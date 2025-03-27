@@ -173,3 +173,5 @@ riderModule.iml
 # Msic
 .DS_Store
 *.zip
+
+.fake

@@ -1,5 +1,6 @@
 using System.Text;
 using Jellyfin.Plugin.MetaTube.Extensions;
+using Jellyfin.Plugin.MetaTube.Download;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
@@ -22,7 +23,7 @@ public class GenerateTrailersTask : IScheduledTask
     private const string TrailersFolder = "trailers";
 
     // Uniform suffix for all trailer files.
-    private const string TrailerFileSuffix = "-Trailer.strm";
+    private const string TrailerFileSuffix = "-trailer.mp4";
     private const string TrailerSearchPattern = $"*{TrailerFileSuffix}";
 
     // UTF-8 without BOM encoding.
@@ -30,18 +31,21 @@ public class GenerateTrailersTask : IScheduledTask
 
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger _logger;
+    private readonly TrailerDownloader _trailerDownloader;
 
 #if __EMBY__
     public GenerateTrailersTask(ILogManager logManager, ILibraryManager libraryManager)
     {
         _logger = logManager.CreateLogger<GenerateTrailersTask>();
         _libraryManager = libraryManager;
+        _trailerDownloader = new TrailerDownloader(logManager.CreateLogger<TrailerDownloader>());
     }
 #else
     public GenerateTrailersTask(ILogger<GenerateTrailersTask> logger, ILibraryManager libraryManager)
     {
         _logger = logger;
         _libraryManager = libraryManager;
+        _trailerDownloader = new TrailerDownloader(logger);
     }
 #endif
 
@@ -105,58 +109,32 @@ public class GenerateTrailersTask : IScheduledTask
 
                 // Skip if no remote trailers.
                 if (string.IsNullOrWhiteSpace(trailerUrl))
-                {
-                    if (Directory.Exists(trailersFolderPath))
-                    {
-                        // Delete obsolete trailer files.
-                        DeleteFiles(trailersFolderPath, TrailerSearchPattern);
-
-                        // Delete directory if empty.
-                        DeleteDirectoryIfEmpty(trailersFolderPath);
-                    }
-
                     continue;
-                }
 
                 var trailerFilePath = Path.Join(trailersFolderPath,
                     $"{item.Name.Split().First()}{TrailerFileSuffix}");
 
-#if __EMBY__
-                var lastSavedUtcDateTime = item.DateLastSaved.UtcDateTime;
-#else
-                var lastSavedUtcDateTime = item.DateLastSaved.ToUniversalTime();
-#endif
-
-                // When trailer file already exists.
+                // 如果预告片文件已存在，跳过
                 if (File.Exists(trailerFilePath))
-                {
-                    // Skip if trailer file is up to date.
-                    if (File.GetLastWriteTimeUtc(trailerFilePath).CompareTo(lastSavedUtcDateTime) >= 0)
-                        continue;
-
-                    // Skip if content is not modified.
-                    if (string.Equals(await File.ReadAllTextAsync(trailerFilePath, cancellationToken), trailerUrl))
-                    {
-                        File.SetLastWriteTimeUtc(trailerFilePath, DateTime.UtcNow);
-                        continue;
-                    }
-                }
+                    continue;
 
                 // Create trailers folder if not exists.
                 if (!Directory.Exists(trailersFolderPath))
                     Directory.CreateDirectory(trailersFolderPath);
 
-                // Delete other trailer files, if any.
-                DeleteFiles(trailersFolderPath, TrailerSearchPattern, trailerFilePath);
+                _logger.Info("Downloading trailer for video {0} to {1}", item.Name, trailerFilePath);
 
-                _logger.Info("Generate trailer for video {0} at {1}", item.Name, trailerFilePath);
-
-                // Write .strm trailer file.
-                await File.WriteAllTextAsync(trailerFilePath, trailerUrl, Utf8WithoutBom, cancellationToken);
+                // Download trailer file.
+                var success = await _trailerDownloader.DownloadTrailerAsync(trailerUrl, trailerFilePath, progress, cancellationToken);
+                
+                if (success)
+                {
+                    File.SetLastWriteTimeUtc(trailerFilePath, DateTime.UtcNow);
+                }
             }
             catch (Exception e)
             {
-                _logger.Error("Generate trailer for video {0} error: {1}", item.Name, e.Message);
+                _logger.Error("Download trailer for video {0} error: {1}", item.Name, e.Message);
             }
         }
 
