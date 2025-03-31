@@ -19,7 +19,7 @@ public class TrailerDownloader
     // 使用静态 HttpClient 以避免套接字耗尽问题
     private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(30) };
     private const int BufferSize = 8192; // 8KB buffer for downloading
-    private const int DownloadTimeoutSeconds = 30; // 30秒下载超时
+    private const int DownloadTimeoutSeconds = 300; // 300秒下载超时
 
 #if __EMBY__
     public TrailerDownloader(ILogger logger)
@@ -35,7 +35,7 @@ public class TrailerDownloader
     {
         try
         {
-            // 创建一个30秒超时的令牌
+            // 创建一个300秒超时的令牌
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(DownloadTimeoutSeconds));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, cancellationToken);
             var combinedToken = linkedCts.Token;
@@ -99,6 +99,24 @@ public class TrailerDownloader
                         progress?.Report(progressPercentage);
                     }
                 }
+            }
+
+            // 验证文件大小是否与预期一致
+            if (totalBytes > 0 && downloadedBytes != totalBytes)
+            {
+#if __EMBY__
+                _logger.Error("File size mismatch for trailer: {0}. Expected: {1}, Actual: {2}", 
+                    trailerFilePath, totalBytes, downloadedBytes);
+#else
+                _logger.LogError("File size mismatch for trailer: {0}. Expected: {1}, Actual: {2}", 
+                    trailerFilePath, totalBytes, downloadedBytes);
+#endif
+                // 如果文件大小不匹配，则删除它
+                if (File.Exists(trailerFilePath))
+                {
+                    File.Delete(trailerFilePath);
+                }
+                return false;
             }
 
 #if __EMBY__

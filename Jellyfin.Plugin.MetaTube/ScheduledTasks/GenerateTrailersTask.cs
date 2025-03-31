@@ -124,12 +124,39 @@ public class GenerateTrailersTask : IScheduledTask
 
                 _logger.Info("Downloading trailer for video {0} to {1}", item.Name, trailerFilePath);
 
-                // Download trailer file.
-                var success = await _trailerDownloader.DownloadTrailerAsync(trailerUrl, trailerFilePath, progress, cancellationToken);
+                // 添加重试逻辑
+                const int maxRetries = 2;
+                bool success = false;
                 
-                if (success)
+                for (int retryCount = 0; retryCount <= maxRetries; retryCount++)
                 {
-                    File.SetLastWriteTimeUtc(trailerFilePath, DateTime.UtcNow);
+                    if (retryCount > 0)
+                    {
+#if __EMBY__
+                        _logger.Info("Retry {0}/{1} downloading trailer for video {2}", retryCount, maxRetries, item.Name);
+#else
+                        _logger.LogInformation("Retry {0}/{1} downloading trailer for video {2}", retryCount, maxRetries, item.Name);
+#endif
+                    }
+                    
+                    // Download trailer file.
+                    success = await _trailerDownloader.DownloadTrailerAsync(trailerUrl, trailerFilePath, progress, cancellationToken);
+                    
+                    if (success)
+                    {
+                        File.SetLastWriteTimeUtc(trailerFilePath, DateTime.UtcNow);
+                        break;
+                    }
+                    
+                    // 最后一次尝试失败后记录日志
+                    if (retryCount == maxRetries)
+                    {
+#if __EMBY__
+                        _logger.Error("Failed to download trailer for video {0} after {1} retries", item.Name, maxRetries);
+#else
+                        _logger.LogError("Failed to download trailer for video {0} after {1} retries", item.Name, maxRetries);
+#endif
+                    }
                 }
             }
             catch (Exception e)
