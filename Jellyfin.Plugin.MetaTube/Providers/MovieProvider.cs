@@ -156,15 +156,7 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
         // Add tag (series).
         if (!string.IsNullOrWhiteSpace(m.Series))
             result.Item.AddTag(m.Series);
-
-        // Add tag (maker).
-        if (!string.IsNullOrWhiteSpace(m.Maker))
-            result.Item.AddTag(m.Maker);
-
-        // Add tag (label).
-        if (!string.IsNullOrWhiteSpace(m.Label))
-            result.Item.AddTag(m.Label);
-
+        
         // Add director.
         if (Configuration.EnableDirectors && !string.IsNullOrWhiteSpace(m.Director))
             result.AddPerson(new PersonInfo
