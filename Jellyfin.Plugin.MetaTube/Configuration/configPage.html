@@ -171,7 +171,7 @@
                                 <option value="Baidu">Baidu</option>
                                 <option value="Google">Google</option>
                                 <option value="GoogleFree">Google (Free)</option>
-                                <option value="DeepL">DeepL (Free)</option>
+                                <option value="DeepL">DeepL</option>
                                 <option value="OpenAi">OpenAI</option>
                             </select>
                         </div>
@@ -195,6 +195,11 @@
                                 <label class="inputLabel inputLabelUnfocused" for="txtGoogleApiKey">Google api key:</label>
                                 <input id="txtGoogleApiKey" is="emby-input" name="txtGoogleApiKey" type="text"/>
                                 <div class="fieldDescription"></div>
+                            </div>
+                            <div class="inputContainer">
+                                <label class="inputLabel inputLabelUnfocused" for="txtGoogleApiUrl">Google api url:</label>
+                                <input id="txtGoogleApiUrl" is="emby-input" name="txtGoogleApiUrl" type="text"/>
+                                <div class="fieldDescription">Custom Google translate api url. (optional)</div>
                             </div>
                         </div>
 
@@ -357,6 +362,7 @@
                 $('#txtBaiduAppId', page).val(config.BaiduAppId).change();
                 $('#txtBaiduAppKey', page).val(config.BaiduAppKey).change();
                 $('#txtGoogleApiKey', page).val(config.GoogleApiKey).change();
+                $('#txtGoogleApiUrl', page).val(config.GoogleApiUrl).change();
                 $('#txtDeepLApiKey', page).val(config.DeepLApiKey).change();
                 $('#txtDeepLApiUrl', page).val(config.DeepLApiUrl).change();
                 $('#txtOpenAiApiKey', page).val(config.OpenAiApiKey).change();
@@ -397,6 +403,7 @@
                 config.BaiduAppId = $('#txtBaiduAppId', form).val();
                 config.BaiduAppKey = $('#txtBaiduAppKey', form).val();
                 config.GoogleApiKey = $('#txtGoogleApiKey', form).val();
+                config.GoogleApiUrl = $('#txtGoogleApiUrl', form).val();
                 config.DeepLApiKey = $('#txtDeepLApiKey', form).val();
                 config.DeepLXAltUrl = $('#txtDeepLApiUrl', form).val();
                 config.OpenAiApiKey = $('#txtOpenAiApiKey', form).val();
