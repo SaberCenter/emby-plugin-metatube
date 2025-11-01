@@ -35,19 +35,23 @@ public class OrganizeMetadataTask : IScheduledTask
     }
 #endif
 
-    public string Key => $"{Plugin.Instance.Name}OrganizeMetadata";
+    public string Key => $"{Plugin.ProviderName}OrganizeMetadata";
 
     public string Name => "Organize Metadata";
 
-    public string Description => $"Organizes video metadata provided by {Plugin.Instance.Name} in library.";
+    public string Description => $"Organizes video metadata provided by {Plugin.ProviderName} in library.";
 
-    public string Category => Plugin.Instance.Name;
+    public string Category => Plugin.ProviderName;
 
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
     {
         yield return new TaskTriggerInfo
         {
+#if __EMBY__
             Type = TaskTriggerInfo.TriggerDaily,
+#else
+            Type = TaskTriggerInfoType.DailyTrigger,
+#endif
             TimeOfDayTicks = TimeSpan.FromHours(3).Ticks
         };
     }
@@ -66,10 +70,10 @@ public class OrganizeMetadataTask : IScheduledTask
         {
             MediaTypes = new[] { MediaType.Video },
 #if __EMBY__
-            HasAnyProviderId = new[] { Plugin.Instance.Name },
+            HasAnyProviderId = new[] { Plugin.ProviderId },
             IncludeItemTypes = new[] { nameof(Movie) },
 #else
-            HasAnyProviderId = new Dictionary<string, string> { { Plugin.Instance.Name, string.Empty } },
+            HasAnyProviderId = new Dictionary<string, string> { { Plugin.ProviderId, string.Empty } },
             IncludeItemTypes = new[] { BaseItemKind.Movie }
 #endif
         }).ToList();
@@ -177,7 +181,7 @@ public class OrganizeMetadataTask : IScheduledTask
 
     private static async Task SetPrimaryImage(BaseItem item, string badge, CancellationToken cancellationToken)
     {
-        var pid = item.GetPid(Plugin.Instance.Name);
+        var pid = item.GetPid(Plugin.ProviderId);
         if (string.IsNullOrWhiteSpace(pid.Id) || string.IsNullOrWhiteSpace(pid.Provider))
             return;
 
