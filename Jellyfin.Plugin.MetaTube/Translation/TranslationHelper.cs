@@ -57,6 +57,11 @@ public static class TranslationHelper
                     { "openai-model", Configuration.OpenAiModel }
                 });
                 break;
+            case TranslationEngine.DeepSeek:
+                // DeepSeek is called directly from the plugin (see TranslateWithDelay),
+                // so no backend parameters are required here.
+                millisecondsDelay = 200;
+                break;
             default:
                 throw new ArgumentException($"Invalid translation engine: {Configuration.TranslationEngine}");
         }
@@ -68,6 +73,12 @@ public static class TranslationHelper
             async Task<string> TranslateWithDelay()
             {
                 await Task.Delay(millisecondsDelay, cancellationToken);
+
+                // DeepSeek bypasses the MetaTube backend and calls the API directly,
+                // allowing the prompt to be configured from the plugin UI.
+                if (Configuration.TranslationEngine == TranslationEngine.DeepSeek)
+                    return await DeepSeekClient.TranslateAsync(q, to, cancellationToken).ConfigureAwait(false);
+
                 return (await ApiClient
                     .TranslateAsync(q, from, to, Configuration.TranslationEngine.ToString(), nv, cancellationToken)
                     .ConfigureAwait(false)).TranslatedText;
