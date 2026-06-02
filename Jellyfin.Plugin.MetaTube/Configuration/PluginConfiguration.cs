@@ -231,8 +231,7 @@ public class PluginConfiguration : BasePluginConfiguration
 
 #if __EMBY__
     [DisplayName("DeepSeek title prompt")]
-    [Description(
-        "Prompt used to translate the movie title. Optional placeholders: {lang} = target language, {text} = original Japanese title. If {text} is omitted, the prompt is used as a system instruction and the title is sent as a separate message.")]
+    [Description("Prompt for translating the title. Optional placeholders: {lang}, {text}.")]
     [EditMultiline(6)]
     [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
 #endif
@@ -240,8 +239,7 @@ public class PluginConfiguration : BasePluginConfiguration
 
 #if __EMBY__
     [DisplayName("DeepSeek summary prompt")]
-    [Description(
-        "Prompt used to translate the movie summary. Optional placeholders: {lang} = target language, {text} = original Japanese summary. If {text} is omitted, the prompt is used as a system instruction and the summary is sent as a separate message.")]
+    [Description("Prompt for translating the summary. Optional placeholders: {lang}, {text}.")]
     [EditMultiline(6)]
     [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
 #endif
