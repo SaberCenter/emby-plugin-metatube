@@ -209,6 +209,55 @@ public class PluginConfiguration : BasePluginConfiguration
     public string OpenAiModel { get; set; } = string.Empty;
 
 #if __EMBY__
+    [DisplayName("DeepSeek api key")]
+    [Description("Access token for the DeepSeek API.")]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
+#endif
+    public string DeepSeekApiKey { get; set; } = string.Empty;
+
+#if __EMBY__
+    [DisplayName("DeepSeek api url")]
+    [Description("Custom DeepSeek-compatible api url. (optional, default: https://api.deepseek.com)")]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
+#endif
+    public string DeepSeekApiUrl { get; set; } = string.Empty;
+
+#if __EMBY__
+    [DisplayName("DeepSeek model")]
+    [Description("Model to use for translation.")]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
+#endif
+    public DeepSeekModelType DeepSeekModel { get; set; } = DeepSeekModelType.Flash;
+
+#if __EMBY__
+    [DisplayName("DeepSeek title prompt")]
+    [Description("Prompt for translating the title. Optional placeholders: {lang}, {text}.")]
+    [EditMultiline(6)]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
+#endif
+    public string DeepSeekTitlePrompt { get; set; } = DefaultDeepSeekTitlePrompt;
+
+#if __EMBY__
+    [DisplayName("DeepSeek summary prompt")]
+    [Description("Prompt for translating the summary. Optional placeholders: {lang}, {text}.")]
+    [EditMultiline(6)]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
+#endif
+    public string DeepSeekSummaryPrompt { get; set; } = DefaultDeepSeekSummaryPrompt;
+
+    public static string DefaultDeepSeekTitlePrompt => @"你是一名专业的影视字幕翻译，精通日语与中文。请将用户提供的日本影片标题翻译成简体中文。
+要求：
+1. 只输出翻译后的标题本身，不要输出任何解释、注释、原文或引号；
+2. 保留番号、人名、品牌名等专有名词；
+3. 标题简洁通顺，符合中文表达习惯。";
+
+    public static string DefaultDeepSeekSummaryPrompt => @"你是一名专业的影视字幕翻译，精通日语与中文。请将用户提供的日本影片简介翻译成简体中文。
+要求：
+1. 只输出翻译后的简介本身，不要输出任何解释、注释、原文或引号；
+2. 保留人名、品牌名等专有名词；
+3. 译文通顺自然，忠实原意，符合中文表达习惯。";
+
+#if __EMBY__
     [DisplayName("Enable title substitution")]
 #endif
     public bool EnableTitleSubstitution { get; set; } = false;
