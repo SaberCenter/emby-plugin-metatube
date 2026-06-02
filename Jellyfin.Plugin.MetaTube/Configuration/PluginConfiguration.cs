@@ -232,20 +232,17 @@ public class PluginConfiguration : BasePluginConfiguration
 #if __EMBY__
     [DisplayName("DeepSeek prompt")]
     [Description(
-        "Custom prompt for translation. Placeholders: {lang} = target language, {text} = the original (Japanese) text.")]
+        "Custom prompt. Optional placeholders: {lang} = target language, {text} = original Japanese text. If {text} is omitted, the prompt is used as a system instruction and the original text is sent as a separate message.")]
     [EditMultiline(8)]
     [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
 #endif
     public string DeepSeekPrompt { get; set; } = DefaultDeepSeekPrompt;
 
-    public static string DefaultDeepSeekPrompt => @"你是一名专业的影视字幕翻译，精通日语与中文。请把下面这段日本影片的文本翻译成{lang}。
+    public static string DefaultDeepSeekPrompt => @"你是一名专业的影视字幕翻译，精通日语与中文。请将用户提供的日本影片文本翻译成简体中文。
 要求：
 1. 只输出翻译结果本身，不要输出任何解释、注释、原文或引号；
 2. 保留人名、番号、品牌名等专有名词；
-3. 译文通顺自然，符合中文表达习惯。
-
-待翻译文本：
-{text}";
+3. 译文通顺自然，符合中文表达习惯。";
 
 #if __EMBY__
     [DisplayName("Enable title substitution")]

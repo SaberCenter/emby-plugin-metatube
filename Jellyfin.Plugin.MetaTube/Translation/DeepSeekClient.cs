@@ -56,7 +56,11 @@ public static class DeepSeekClient
             model = GetModelId(),
             messages,
             stream = false,
-            temperature = 1.3
+            temperature = 1.3,
+            // Translation does not benefit from chain-of-thought. DeepSeek V4
+            // defaults to thinking = enabled, so disable it explicitly for
+            // faster and cheaper non-thinking calls.
+            thinking = new { type = "disabled" }
         };
 
         var json = JsonSerializer.Serialize(payload);
