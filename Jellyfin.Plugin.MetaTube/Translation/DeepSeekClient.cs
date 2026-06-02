@@ -19,28 +19,31 @@ public static class DeepSeekClient
 
     /// <summary>
     ///     Translate a single piece of text into the target language using the
-    ///     user-defined prompt template.
+    ///     caller-supplied prompt template.
     /// </summary>
     /// <param name="text">The source (Japanese) text to translate.</param>
     /// <param name="to">The target language code (e.g. zh, en).</param>
+    /// <param name="prompt">The prompt template to use for this field.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The translated text.</returns>
-    public static async Task<string> TranslateAsync(string text, string to, CancellationToken cancellationToken)
+    public static async Task<string> TranslateAsync(string text, string to, string prompt,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(Configuration.DeepSeekApiKey))
             throw new ArgumentException("DeepSeek api key is not set");
 
-        var prompt = Configuration.DeepSeekPrompt;
-        if (string.IsNullOrWhiteSpace(prompt))
-            prompt = PluginConfiguration.DefaultDeepSeekPrompt;
-
         var language = ToLanguageName(to);
 
-        // Build chat messages. If the prompt template contains the {text}
-        // placeholder, the user controls the whole message; otherwise we treat
-        // the prompt as a system instruction and send the text separately.
+        // Build chat messages. If the prompt contains the {text} placeholder,
+        // the caller-supplied prompt controls the whole message; otherwise the
+        // prompt is used as a system instruction and the text is sent
+        // separately. An empty prompt falls back to sending the raw text.
         var messages = new List<object>();
-        if (prompt.Contains("{text}"))
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            messages.Add(new { role = "user", content = text });
+        }
+        else if (prompt.Contains("{text}"))
         {
             var content = prompt.Replace("{lang}", language).Replace("{text}", text);
             messages.Add(new { role = "user", content });

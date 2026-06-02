@@ -14,7 +14,7 @@ public static class TranslationHelper
     private static PluginConfiguration Configuration => Plugin.Instance.Configuration;
 
     private static async Task<string> TranslateAsync(string q, string from, string to,
-        CancellationToken cancellationToken)
+        string deepSeekPrompt, CancellationToken cancellationToken)
     {
         int millisecondsDelay;
         var nv = new NameValueCollection();
@@ -77,7 +77,8 @@ public static class TranslationHelper
                 // DeepSeek bypasses the MetaTube backend and calls the API directly,
                 // allowing the prompt to be configured from the plugin UI.
                 if (Configuration.TranslationEngine == TranslationEngine.DeepSeek)
-                    return await DeepSeekClient.TranslateAsync(q, to, cancellationToken).ConfigureAwait(false);
+                    return await DeepSeekClient.TranslateAsync(q, to, deepSeekPrompt, cancellationToken)
+                        .ConfigureAwait(false);
 
                 return (await ApiClient
                     .TranslateAsync(q, from, to, Configuration.TranslationEngine.ToString(), nv, cancellationToken)
@@ -98,10 +99,26 @@ public static class TranslationHelper
             throw new ArgumentException($"language not allowed: {to}");
 
         if (Configuration.TranslationMode.HasFlag(TranslationMode.Title) && !string.IsNullOrWhiteSpace(m.Title))
-            m.Title = await TranslateAsync(m.Title, AutoLanguageCode, to, cancellationToken);
+            m.Title = await TranslateAsync(m.Title, AutoLanguageCode, to, ResolveDeepSeekTitlePrompt(),
+                cancellationToken);
 
         if (Configuration.TranslationMode.HasFlag(TranslationMode.Summary) && !string.IsNullOrWhiteSpace(m.Summary))
-            m.Summary = await TranslateAsync(m.Summary, AutoLanguageCode, to, cancellationToken);
+            m.Summary = await TranslateAsync(m.Summary, AutoLanguageCode, to, ResolveDeepSeekSummaryPrompt(),
+                cancellationToken);
+    }
+
+    private static string ResolveDeepSeekTitlePrompt()
+    {
+        return string.IsNullOrWhiteSpace(Configuration.DeepSeekTitlePrompt)
+            ? PluginConfiguration.DefaultDeepSeekTitlePrompt
+            : Configuration.DeepSeekTitlePrompt;
+    }
+
+    private static string ResolveDeepSeekSummaryPrompt()
+    {
+        return string.IsNullOrWhiteSpace(Configuration.DeepSeekSummaryPrompt)
+            ? PluginConfiguration.DefaultDeepSeekSummaryPrompt
+            : Configuration.DeepSeekSummaryPrompt;
     }
 
     private static async Task<T> RetryAsync<T>(Func<Task<T>> func, int retryCount)
