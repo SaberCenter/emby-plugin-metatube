@@ -1,4 +1,3 @@
-using System.Text;
 using Jellyfin.Plugin.MetaTube.Extensions;
 using Jellyfin.Plugin.MetaTube.Download;
 using MediaBrowser.Controller.Entities;
@@ -24,14 +23,10 @@ public class GenerateTrailersTask : IScheduledTask
 
     // Uniform suffix for all trailer files.
     private const string TrailerFileSuffix = "-trailer.mp4";
-    private const string TrailerSearchPattern = $"*{TrailerFileSuffix}";
 
     // 下载中的临时文件后缀与匹配模式（例如 SSIS-001-trailer.mp4.tmp）。
     private const string TempFileSuffix = ".tmp";
     private const string TempSearchPattern = $"*{TrailerFileSuffix}{TempFileSuffix}";
-
-    // UTF-8 without BOM encoding.
-    private static readonly Encoding Utf8WithoutBom = new UTF8Encoding(false);
 
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger _logger;
@@ -185,22 +180,6 @@ public class GenerateTrailersTask : IScheduledTask
         progress?.Report(100);
     }
 
-    private static void DeleteFiles(string path, string searchPattern, params string[] excludedFiles)
-    {
-        DeleteFiles(Directory.GetFiles(path, searchPattern).Where(file => !excludedFiles.Contains(file)));
-    }
-
-    private static void DeleteFiles(IEnumerable<string> files)
-    {
-        foreach (var file in files) File.Delete(file);
-    }
-
-    private static void DeleteDirectoryIfEmpty(string path)
-    {
-        if (!Directory.GetDirectories(path).Any() && !Directory.GetFiles(path).Any())
-            Directory.Delete(path);
-    }
-
     // 清理 trailers 文件夹中遗留的孤儿临时文件（上次下载因断电 / 强杀中断留下的 .tmp）。
     // 静默忽略异常：清理失败不应影响后续下载。
     private static void CleanupOrphanTempFiles(string trailersFolderPath)
@@ -210,7 +189,8 @@ public class GenerateTrailersTask : IScheduledTask
 
         try
         {
-            DeleteFiles(trailersFolderPath, TempSearchPattern);
+            foreach (var tempFile in Directory.GetFiles(trailersFolderPath, TempSearchPattern))
+                File.Delete(tempFile);
         }
         catch
         {
