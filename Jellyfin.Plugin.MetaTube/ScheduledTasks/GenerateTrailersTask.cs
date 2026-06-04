@@ -26,6 +26,10 @@ public class GenerateTrailersTask : IScheduledTask
     private const string TrailerFileSuffix = "-trailer.mp4";
     private const string TrailerSearchPattern = $"*{TrailerFileSuffix}";
 
+    // 下载中的临时文件后缀与匹配模式（例如 SSIS-001-trailer.mp4.tmp）。
+    private const string TempFileSuffix = ".tmp";
+    private const string TempSearchPattern = $"*{TrailerFileSuffix}{TempFileSuffix}";
+
     // UTF-8 without BOM encoding.
     private static readonly Encoding Utf8WithoutBom = new UTF8Encoding(false);
 
@@ -109,6 +113,10 @@ public class GenerateTrailersTask : IScheduledTask
                 if (File.Exists(Path.Join(trailersFolderPath, ".ignore")))
                     continue;
 
+                // 清理上次中断（断电 / kill -9）遗留的孤儿临时文件，避免永久残留。
+                // 放在 .ignore 之后、各 continue 之前，确保即使本片随后被跳过也能清掉残留。
+                CleanupOrphanTempFiles(trailersFolderPath);
+
                 var trailerUrl = item.GetTrailerUrl();
 
                 // Skip if no remote trailers.
@@ -191,6 +199,23 @@ public class GenerateTrailersTask : IScheduledTask
     {
         if (!Directory.GetDirectories(path).Any() && !Directory.GetFiles(path).Any())
             Directory.Delete(path);
+    }
+
+    // 清理 trailers 文件夹中遗留的孤儿临时文件（上次下载因断电 / 强杀中断留下的 .tmp）。
+    // 静默忽略异常：清理失败不应影响后续下载。
+    private static void CleanupOrphanTempFiles(string trailersFolderPath)
+    {
+        if (!Directory.Exists(trailersFolderPath))
+            return;
+
+        try
+        {
+            DeleteFiles(trailersFolderPath, TempSearchPattern);
+        }
+        catch
+        {
+            // 忽略清理临时文件时的异常。
+        }
     }
 
     // 同步进度适配器：在调用线程内直接转发进度（不经过 SynchronizationContext），
