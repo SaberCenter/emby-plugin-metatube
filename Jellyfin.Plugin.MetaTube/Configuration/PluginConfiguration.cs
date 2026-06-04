@@ -59,7 +59,7 @@ public class PluginConfiguration : BasePluginConfiguration
 
 #if __EMBY__
     [DisplayName("Enable trailers")]
-    [Description("Generate online video trailers in strm format.")]
+    [Description("Download preview trailers to the local library as mp4 files.")]
 #endif
     public bool EnableTrailers { get; set; } = false;
 

@@ -16,8 +16,10 @@ namespace Jellyfin.Plugin.MetaTube.Download;
 public class TrailerDownloader
 {
     private readonly ILogger _logger;
-    // 使用静态 HttpClient 以避免套接字耗尽问题
-    private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(30) };
+    // 使用静态 HttpClient 以避免套接字耗尽问题。
+    // 下载超时统一由 DownloadTimeoutSeconds 令牌控制，故禁用 HttpClient 自身超时，
+    // 避免实例级 30s 超时与下载级 300s 超时混用造成的混淆。
+    private static readonly HttpClient _httpClient = new() { Timeout = Timeout.InfiniteTimeSpan };
     private const int BufferSize = 8192; // 8KB buffer for downloading
     private const int DownloadTimeoutSeconds = 300; // 300秒下载超时
 
@@ -69,21 +71,11 @@ public class TrailerDownloader
             
             var buffer = new byte[BufferSize];
             long downloadedBytes = 0;
-            var startTime = DateTime.UtcNow;
 
             while (true)
             {
-                // 检查是否超时
-                if ((DateTime.UtcNow - startTime).TotalSeconds > DownloadTimeoutSeconds)
-                {
-#if __EMBY__
-                    _logger.Warn("Download timeout for trailer: {0}", trailerFilePath);
-#else
-                    _logger.LogWarning("Download timeout for trailer: {0}", trailerFilePath);
-#endif
-                    return false;
-                }
-
+                // 超时由 combinedToken（DownloadTimeoutSeconds）统一控制：
+                // 一旦超时，下面的 ReadAsync 会抛出 OperationCanceledException 并被捕获处理。
                 var bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, combinedToken);
                 if (bytesRead == 0) break;
 

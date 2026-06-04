@@ -128,6 +128,11 @@ public class GenerateTrailersTask : IScheduledTask
 
                 _logger.Info("Downloading trailer for video {0} to {1}", item.Name, trailerFilePath);
 
+                // 将单文件下载进度映射到任务整体进度区间 [idx, idx+1] / 总数，
+                // 避免任务级与下载级共用同一个 progress 导致进度条来回跳动。
+                var downloadProgress = new SyncProgress(p =>
+                    progress?.Report((idx + Math.Clamp(p, 0.0, 100.0) / 100.0) / items.Count * 100));
+
                 // 添加重试逻辑
                 const int maxRetries = 2;
                 bool success = false;
@@ -144,7 +149,7 @@ public class GenerateTrailersTask : IScheduledTask
                     }
                     
                     // Download trailer file.
-                    success = await _trailerDownloader.DownloadTrailerAsync(trailerUrl, trailerFilePath, progress, cancellationToken);
+                    success = await _trailerDownloader.DownloadTrailerAsync(trailerUrl, trailerFilePath, downloadProgress, cancellationToken);
                     
                     if (success)
                     {
@@ -186,5 +191,22 @@ public class GenerateTrailersTask : IScheduledTask
     {
         if (!Directory.GetDirectories(path).Any() && !Directory.GetFiles(path).Any())
             Directory.Delete(path);
+    }
+
+    // 同步进度适配器：在调用线程内直接转发进度（不经过 SynchronizationContext），
+    // 确保下载进度被实时、有序地映射到任务整体进度。
+    private sealed class SyncProgress : IProgress<double>
+    {
+        private readonly Action<double> _handler;
+
+        public SyncProgress(Action<double> handler)
+        {
+            _handler = handler;
+        }
+
+        public void Report(double value)
+        {
+            _handler(value);
+        }
     }
 }
