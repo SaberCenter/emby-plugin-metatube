@@ -98,7 +98,6 @@ public class GenerateTrailersTask : IScheduledTask
         foreach (var (idx, item) in items.WithIndex())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            progress?.Report((double)idx / items.Count * 100);
 
             try
             {
@@ -131,11 +130,6 @@ public class GenerateTrailersTask : IScheduledTask
 
                 _logger.Info("Downloading trailer for video {0} to {1}", item.Name, trailerFilePath);
 
-                // 将单文件下载进度映射到任务整体进度区间 [idx, idx+1] / 总数，
-                // 避免任务级与下载级共用同一个 progress 导致进度条来回跳动。
-                var downloadProgress = new SyncProgress(p =>
-                    progress?.Report((idx + Math.Clamp(p, 0.0, 100.0) / 100.0) / items.Count * 100));
-
                 // 添加重试逻辑
                 const int maxRetries = 2;
                 bool success = false;
@@ -151,8 +145,8 @@ public class GenerateTrailersTask : IScheduledTask
 #endif
                     }
                     
-                    // Download trailer file.
-                    success = await _trailerDownloader.DownloadTrailerAsync(trailerUrl, trailerFilePath, downloadProgress, cancellationToken);
+                    // Download trailer file.（进度按整部影片计数推进，不传单文件进度）
+                    success = await _trailerDownloader.DownloadTrailerAsync(trailerUrl, trailerFilePath, null, cancellationToken);
                     
                     if (success)
                     {
@@ -175,6 +169,10 @@ public class GenerateTrailersTask : IScheduledTask
             {
                 _logger.Error("Download trailer for video {0} error: {1}", item.Name, e.Message);
             }
+
+            // 每处理完一部影片（无论下载、跳过或失败），按整体进度前进一格：
+            // 进度 = 已处理部数 / 总部数 × 100。完成一部就前进，直观且不依赖 Content-Length。
+            progress?.Report((double)(idx + 1) / items.Count * 100);
         }
 
         progress?.Report(100);
@@ -195,23 +193,6 @@ public class GenerateTrailersTask : IScheduledTask
         catch
         {
             // 忽略清理临时文件时的异常。
-        }
-    }
-
-    // 同步进度适配器：在调用线程内直接转发进度（不经过 SynchronizationContext），
-    // 确保下载进度被实时、有序地映射到任务整体进度。
-    private sealed class SyncProgress : IProgress<double>
-    {
-        private readonly Action<double> _handler;
-
-        public SyncProgress(Action<double> handler)
-        {
-            _handler = handler;
-        }
-
-        public void Report(double value)
-        {
-            _handler(value);
         }
     }
 }
