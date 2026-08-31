@@ -1,4 +1,3 @@
-using System.Text;
 using Jellyfin.Plugin.MetaTube.Extensions;
 using Jellyfin.Plugin.MetaTube.Download;
 using MediaBrowser.Controller.Entities;
@@ -24,10 +23,10 @@ public class GenerateTrailersTask : IScheduledTask
 
     // Uniform suffix for all trailer files.
     private const string TrailerFileSuffix = "-trailer.mp4";
-    private const string TrailerSearchPattern = $"*{TrailerFileSuffix}";
 
-    // UTF-8 without BOM encoding.
-    private static readonly Encoding Utf8WithoutBom = new UTF8Encoding(false);
+    // 下载中的临时文件后缀与匹配模式（例如 SSIS-001-trailer.mp4.tmp）。
+    private const string TempFileSuffix = ".tmp";
+    private const string TempSearchPattern = $"*{TrailerFileSuffix}{TempFileSuffix}";
 
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger _logger;
@@ -96,10 +95,12 @@ public class GenerateTrailersTask : IScheduledTask
 #endif
         }).ToList();
 
-        foreach (var (idx, item) in items.WithIndex())
+        // 第一遍：扫描出“待下载”的影片（跳过已下载 / 无预览片 / 被忽略的，且不计入进度），
+        // 顺便清理上次中断遗留的孤儿临时文件。进度条只反映待下载的部分。
+        var pending = new List<(BaseItem Item, string TrailerUrl, string TrailerFilePath, string TrailersFolderPath)>();
+        foreach (var item in items)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            progress?.Report((double)idx / items.Count * 100);
 
             try
             {
@@ -108,6 +109,9 @@ public class GenerateTrailersTask : IScheduledTask
                 // Skip if contains .ignore file.
                 if (File.Exists(Path.Join(trailersFolderPath, ".ignore")))
                     continue;
+
+                // 清理上次中断（断电 / kill -9）遗留的孤儿临时文件，避免永久残留。
+                CleanupOrphanTempFiles(trailersFolderPath);
 
                 var trailerUrl = item.GetTrailerUrl();
 
@@ -118,73 +122,95 @@ public class GenerateTrailersTask : IScheduledTask
                 var trailerFilePath = Path.Join(trailersFolderPath,
                     $"{item.Name.Split().First()}{TrailerFileSuffix}");
 
-                // 如果预告片文件已存在，跳过
+                // 已下载则直接跳过，且不计入进度。
                 if (File.Exists(trailerFilePath))
                     continue;
 
-                // Create trailers folder if not exists.
-                if (!Directory.Exists(trailersFolderPath))
-                    Directory.CreateDirectory(trailersFolderPath);
+                pending.Add((item, trailerUrl, trailerFilePath, trailersFolderPath));
+            }
+            catch (Exception e)
+            {
+                _logger.Error("Scan trailer for video {0} error: {1}", item.Name, e.Message);
+            }
+        }
 
-                _logger.Info("Downloading trailer for video {0} to {1}", item.Name, trailerFilePath);
+        _logger.Info("Trailers to download: {0}", pending.Count);
+
+        // 第二遍：仅下载待下载的影片，进度条按“待下载数”推进，完成一部前进一格。
+        foreach (var (idx, entry) in pending.WithIndex())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                // Create trailers folder if not exists.
+                if (!Directory.Exists(entry.TrailersFolderPath))
+                    Directory.CreateDirectory(entry.TrailersFolderPath);
+
+                _logger.Info("Downloading trailer for video {0} to {1}", entry.Item.Name, entry.TrailerFilePath);
 
                 // 添加重试逻辑
                 const int maxRetries = 2;
-                bool success = false;
-                
-                for (int retryCount = 0; retryCount <= maxRetries; retryCount++)
+                var success = false;
+
+                for (var retryCount = 0; retryCount <= maxRetries; retryCount++)
                 {
                     if (retryCount > 0)
                     {
 #if __EMBY__
-                        _logger.Info("Retry {0}/{1} downloading trailer for video {2}", retryCount, maxRetries, item.Name);
+                        _logger.Info("Retry {0}/{1} downloading trailer for video {2}", retryCount, maxRetries, entry.Item.Name);
 #else
-                        _logger.LogInformation("Retry {0}/{1} downloading trailer for video {2}", retryCount, maxRetries, item.Name);
+                        _logger.LogInformation("Retry {0}/{1} downloading trailer for video {2}", retryCount, maxRetries, entry.Item.Name);
 #endif
                     }
-                    
-                    // Download trailer file.
-                    success = await _trailerDownloader.DownloadTrailerAsync(trailerUrl, trailerFilePath, progress, cancellationToken);
-                    
+
+                    // Download trailer file.（不传单文件进度，进度按待下载影片计数推进）
+                    success = await _trailerDownloader.DownloadTrailerAsync(entry.TrailerUrl, entry.TrailerFilePath, null, cancellationToken);
+
                     if (success)
                     {
-                        File.SetLastWriteTimeUtc(trailerFilePath, DateTime.UtcNow);
+                        File.SetLastWriteTimeUtc(entry.TrailerFilePath, DateTime.UtcNow);
                         break;
                     }
-                    
+
                     // 最后一次尝试失败后记录日志
                     if (retryCount == maxRetries)
                     {
 #if __EMBY__
-                        _logger.Error("Failed to download trailer for video {0} after {1} retries", item.Name, maxRetries);
+                        _logger.Error("Failed to download trailer for video {0} after {1} retries", entry.Item.Name, maxRetries);
 #else
-                        _logger.LogError("Failed to download trailer for video {0} after {1} retries", item.Name, maxRetries);
+                        _logger.LogError("Failed to download trailer for video {0} after {1} retries", entry.Item.Name, maxRetries);
 #endif
                     }
                 }
             }
             catch (Exception e)
             {
-                _logger.Error("Download trailer for video {0} error: {1}", item.Name, e.Message);
+                _logger.Error("Download trailer for video {0} error: {1}", entry.Item.Name, e.Message);
             }
+
+            // 完成一部待下载影片就前进一格：进度 = 已处理待下载数 / 待下载总数 × 100。
+            progress?.Report((double)(idx + 1) / pending.Count * 100);
         }
 
         progress?.Report(100);
     }
 
-    private static void DeleteFiles(string path, string searchPattern, params string[] excludedFiles)
+    // 清理 trailers 文件夹中遗留的孤儿临时文件（上次下载因断电 / 强杀中断留下的 .tmp）。
+    // 静默忽略异常：清理失败不应影响后续下载。
+    private static void CleanupOrphanTempFiles(string trailersFolderPath)
     {
-        DeleteFiles(Directory.GetFiles(path, searchPattern).Where(file => !excludedFiles.Contains(file)));
-    }
+        if (!Directory.Exists(trailersFolderPath))
+            return;
 
-    private static void DeleteFiles(IEnumerable<string> files)
-    {
-        foreach (var file in files) File.Delete(file);
-    }
-
-    private static void DeleteDirectoryIfEmpty(string path)
-    {
-        if (!Directory.GetDirectories(path).Any() && !Directory.GetFiles(path).Any())
-            Directory.Delete(path);
+        try
+        {
+            foreach (var tempFile in Directory.GetFiles(trailersFolderPath, TempSearchPattern))
+                File.Delete(tempFile);
+        }
+        catch
+        {
+            // 忽略清理临时文件时的异常。
+        }
     }
 }
