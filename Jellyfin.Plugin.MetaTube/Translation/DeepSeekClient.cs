@@ -54,17 +54,24 @@ public static class DeepSeekClient
             messages.Add(new { role = "user", content = text });
         }
 
-        var payload = new
+        // DeepSeek V4 defaults to thinking = enabled, so always send the flag
+        // explicitly and let the plugin setting decide instead of the server default.
+        var enableThinking = Configuration.DeepSeekEnableThinking;
+
+        var payload = new Dictionary<string, object>
         {
-            model = GetModelId(),
-            messages,
-            stream = false,
-            temperature = 1.3,
-            // Translation does not benefit from chain-of-thought. DeepSeek V4
-            // defaults to thinking = enabled, so disable it explicitly for
-            // faster and cheaper non-thinking calls.
-            thinking = new { type = "disabled" }
+            ["model"] = GetModelId(),
+            ["messages"] = messages,
+            ["stream"] = false,
+            ["thinking"] = new { type = enableThinking ? "enabled" : "disabled" }
         };
+
+        if (enableThinking)
+            payload["reasoning_effort"] = GetReasoningEffort();
+        else
+            // Thinking mode ignores temperature (as well as top_p and the penalties),
+            // so the recommended translation temperature is only sent when it is off.
+            payload["temperature"] = 1.3;
 
         var json = JsonSerializer.Serialize(payload);
 
@@ -80,19 +87,84 @@ public static class DeepSeekClient
         var responseText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
-            throw new Exception($"DeepSeek API request error: {(int)response.StatusCode} ({responseText})");
+        {
+            var statusCode = (int)response.StatusCode;
+
+            // 400 (bad request), 401 (bad api key), 402 (insufficient balance) and
+            // 422 (invalid parameters) all require a change on our side, so resending
+            // the identical request is pointless. Everything else (429, 500, 503,
+            // gateway errors) is treated as transient.
+            var isTransient = statusCode is not (400 or 401 or 402 or 422);
+            throw new DeepSeekException(
+                $"DeepSeek API request error: {statusCode} ({Truncate(responseText)})", isTransient);
+        }
 
         using var document = JsonDocument.Parse(responseText);
-        var translated = document.RootElement
-            .GetProperty("choices")[0]
-            .GetProperty("message")
-            .GetProperty("content")
-            .GetString();
+
+        if (!document.RootElement.TryGetProperty("choices", out var choices) ||
+            choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0)
+            throw new DeepSeekException(
+                $"DeepSeek API returned no choices: {Truncate(responseText)}", true);
+
+        var choice = choices[0];
+
+        // A successful HTTP status does not mean the answer is complete: the result
+        // may be truncated, filtered or aborted, and none of those may be written to
+        // the metadata as if the translation had succeeded.
+        var finishReason = choice.TryGetProperty("finish_reason", out var reason)
+            ? reason.GetString()
+            : null;
+
+        switch (finishReason)
+        {
+            case null:
+            case "":
+            case "stop":
+                break;
+            case "length":
+                throw new DeepSeekException(
+                    "DeepSeek API returned a truncated result (finish_reason: length)", false);
+            case "content_filter":
+                throw new DeepSeekException(
+                    "DeepSeek API omitted the content (finish_reason: content_filter)", false);
+            case "insufficient_system_resource":
+                throw new DeepSeekException(
+                    "DeepSeek API ran out of inference resources (finish_reason: insufficient_system_resource)",
+                    true);
+            default:
+                throw new DeepSeekException(
+                    $"DeepSeek API returned an unexpected finish reason: {finishReason}", false);
+        }
+
+        // In thinking mode the reasoning text lives in a sibling reasoning_content
+        // property; only content is the translation.
+        var translated = choice.TryGetProperty("message", out var message) &&
+                         message.TryGetProperty("content", out var messageContent)
+            ? messageContent.GetString()
+            : null;
 
         if (string.IsNullOrWhiteSpace(translated))
-            throw new Exception("DeepSeek API returned empty content");
+            throw new DeepSeekException("DeepSeek API returned empty content", true);
 
         return translated.Trim();
+    }
+
+    private static string Truncate(string s, int maxLength = 512)
+    {
+        if (string.IsNullOrEmpty(s))
+            return string.Empty;
+
+        return s.Length <= maxLength ? s : s[..maxLength] + "...";
+    }
+
+    private static string GetReasoningEffort()
+    {
+        return Configuration.DeepSeekReasoningEffort switch
+        {
+            DeepSeekReasoningEffort.Low => "low",
+            DeepSeekReasoningEffort.Max => "max",
+            _ => "high"
+        };
     }
 
     private static string GetModelId()
@@ -159,8 +231,11 @@ public static class DeepSeekClient
             PooledConnectionIdleTimeout = TimeSpan.FromSeconds(90)
         })
         {
-            // DeepSeek responses (especially for long summaries) can take a while.
-            Timeout = TimeSpan.FromSeconds(120)
+            // DeepSeek keeps a queued request alive with empty lines / SSE comments
+            // and only closes it server-side after about 10 minutes, so a shorter
+            // client timeout just cancels requests that were still waiting to run.
+            // Thinking mode makes those waits noticeably more common.
+            Timeout = TimeSpan.FromMinutes(10)
         };
     }
 

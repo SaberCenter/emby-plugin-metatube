@@ -85,7 +85,7 @@ public static class TranslationHelper
                     .ConfigureAwait(false)).TranslatedText;
             }
 
-            return await RetryAsync(TranslateWithDelay, 5);
+            return await RetryAsync(TranslateWithDelay, 5, cancellationToken);
         }
         finally
         {
@@ -121,17 +121,35 @@ public static class TranslationHelper
             : Configuration.DeepSeekSummaryPrompt;
     }
 
-    private static async Task<T> RetryAsync<T>(Func<Task<T>> func, int retryCount)
+    private static async Task<T> RetryAsync<T>(Func<Task<T>> func, int attemptCount,
+        CancellationToken cancellationToken)
     {
+        var attempt = 0;
         while (true)
         {
             try
             {
                 return await func();
             }
-            catch when (--retryCount > 0)
+            catch (Exception e) when (IsRetryable(e, cancellationToken) && ++attempt < attemptCount)
             {
+                // Back off before retrying a transient failure: 1s, 2s, 4s, 8s.
+                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt - 1)), cancellationToken);
             }
         }
+    }
+
+    private static bool IsRetryable(Exception e, CancellationToken cancellationToken)
+    {
+        // A cancelled scan or scheduled task must abort right away instead of
+        // being retried until the attempts run out.
+        if (cancellationToken.IsCancellationRequested)
+            return false;
+
+        // Permanent DeepSeek errors (bad request, api key, balance, parameters or a
+        // truncated / filtered answer) cannot be fixed by resending the same request.
+        // Anything else -- including a client-side timeout, which also surfaces as an
+        // OperationCanceledException -- is treated as transient.
+        return e is not DeepSeekException { IsTransient: false };
     }
 }

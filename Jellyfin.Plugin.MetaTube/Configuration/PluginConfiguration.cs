@@ -230,6 +230,25 @@ public class PluginConfiguration : BasePluginConfiguration
     public DeepSeekModelType DeepSeekModel { get; set; } = DeepSeekModelType.Flash;
 
 #if __EMBY__
+    [DisplayName("DeepSeek thinking mode")]
+    [Description(
+        "Let the model reason before answering. Better at ambiguous context and terminology, " +
+        "but slower and more expensive. Note that thinking mode ignores the translation temperature. " +
+        "(default: enabled)")]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
+#endif
+    public bool DeepSeekEnableThinking { get; set; } = true;
+
+#if __EMBY__
+    [DisplayName("DeepSeek reasoning effort")]
+    [Description(
+        "How much the model is allowed to think before answering. Lower is faster and cheaper. " +
+        "Only takes effect when thinking mode is enabled. (default: high)")]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
+#endif
+    public DeepSeekReasoningEffort DeepSeekReasoningEffort { get; set; } = DeepSeekReasoningEffort.High;
+
+#if __EMBY__
     [DisplayName("DeepSeek title prompt")]
     [Description("Prompt for translating the title. Optional placeholders: {lang}, {text}.")]
     [EditMultiline(6)]
