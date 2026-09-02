@@ -1,7 +1,7 @@
 # DeepSeek 翻译 API：官方最新规范研究笔记
 
 > 核对日期：2026-08-31（America/Los_Angeles）  
-> 范围：DeepSeek 官方 API 文档的一手资料；本文不包含对仓库实现的代码审查。  
+> 范围：DeepSeek 官方 API 文档的一手资料。正文只陈述官方规范，不做代码审查；第 10 节的检查清单额外标注了本仓库 Emby 插件的落实状态。  
 > 时效提醒：DeepSeek 当前文档已进入 V4 时代，旧的 `deepseek-chat` / `deepseek-reasoner` 资料已过时，不能继续作为当前实现依据。
 
 当前规范页没有逐页展示 `Last-Modified`；“最新”以核对日可见的规范页和[更新日志](https://api-docs.deepseek.com/updates/)为准。更新日志截至 2026-08-21（Vision Exp 发布），其中 V4 Flash 当前版本于 2026-07-31 更新、V4 Pro 当前版本于 2026-08-13 发布。搜索引擎仍可能返回旧版缓存页，不能以旧缓存覆盖当前规范。
@@ -149,7 +149,9 @@ V4 的当前默认行为与旧的“通过两个模型名区分 chat/reasoner”
 - thinking 模式不支持 `temperature`、`top_p`、`presence_penalty`、`frequency_penalty`。为兼容，这些字段不会报错，但不会产生效果。
 - 非工具调用的多轮对话无需回传 `reasoning_content`；即使回传也会被忽略。带 `tools` 的对话则必须完整回传历次 `reasoning_content`，否则 API 返回 400。纯翻译一般不应携带 `tools`。
 
-对常规逐段翻译，建议明确 `thinking: {"type":"disabled"}`：这能避免默认 thinking 引入额外推理延迟/输出成本，并使官方翻译温度 `1.3` 真正生效。这是基于官方参数行为的工程建议，而不是 DeepSeek 对翻译模型档位的官方强制要求。需要复杂语境推断、术语消歧或文学改写时，可以评估开启 thinking，但最终仍只消费 `content`。
+对常规逐段翻译，可以考虑明确 `thinking: {"type":"disabled"}`：这能避免默认 thinking 引入额外推理延迟/输出成本，并使官方翻译温度 `1.3` 真正生效。这是基于官方参数行为的工程建议，而不是 DeepSeek 对翻译模型档位的官方强制要求。需要复杂语境推断、术语消歧或文学改写时，可以开启 thinking，但最终仍只消费 `content`。
+
+> 本仓库取舍：影片标题/简介的语境判断和专有名词处理确实受益于推理，因此插件把 thinking 做成设置项 `DeepSeek thinking mode`（默认开启），并配套 `DeepSeek reasoning effort`（low/high/max，默认 high）。开启时不再发送 `temperature`，关闭时才发送 `1.3`——两者在各自模式下都不生效。
 
 ## 7. 上下文、输出与 token
 
@@ -204,22 +206,25 @@ V4 的当前默认行为与旧的“通过两个模型名区分 chat/reasoner”
 
 以下清单可用于逐项审查项目实现。带“官方”的条目直接来自 DeepSeek 文档；其余为根据该规范形成的工程检查项。
 
-- [ ] **官方**：`base_url` 为 `https://api.deepseek.com`，请求路径正确拼成 `/chat/completions`。[首次 API 调用](https://api-docs.deepseek.com/)
-- [ ] **官方**：使用 Bearer 鉴权，key 不进入请求体。[API 鉴权参考](https://api-docs.deepseek.com/api/deepseek-api/)
-- [ ] **官方**：模型是 `deepseek-v4-flash` 或 `deepseek-v4-pro`，没有继续使用已退役的 `deepseek-chat` / `deepseek-reasoner`。[更新日志](https://api-docs.deepseek.com/updates/)
-- [ ] **官方**：普通翻译使用正式入口，不把 `base_url` 指向只用于 Prefix/FIM 的 `/beta`。
-- [ ] **官方**：输出上限使用 `max_tokens`，system 指令使用 `system` role；没有直接套用 `max_completion_tokens` 或 `developer` role。
-- [ ] 显式决定 thinking，而不是误用 V4 默认 enabled；普通翻译建议 disabled。
-- [ ] **官方**：若配置 `temperature: 1.3` 作为翻译温度，同时确认 thinking 已 disabled，否则 temperature 无效。[温度建议](https://api-docs.deepseek.com/quick_start/parameter_settings/)、[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)
-- [ ] prompt 明确源语言、目标语言、仅输出译文、专有名词/术语规则，以及 HTML/字幕时间码/占位符/换行是否必须原样保留。
-- [ ] 将不可信原文作为数据边界包裹，防止原文中的命令式文本改变翻译规则。
-- [ ] **官方**：读取 `message.content`；thinking 时不把 `reasoning_content` 混入译文。[Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)
-- [ ] **官方**：检查 `finish_reason`，仅把符合业务要求的完成结果交付；`length` 不能算成功。[Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)
-- [ ] **官方**：JSON 模式同时设置 `response_format` 和 JSON prompt，并处理空内容、截断、整体 JSON 解析失败。[JSON Output](https://api-docs.deepseek.com/guides/json_mode/)
-- [ ] **官方**：流式处理忽略 keep-alive，分别拼接 `delta.content` / `delta.reasoning_content`，识别 `[DONE]`。[Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)、[Rate Limit & Isolation](https://api-docs.deepseek.com/quick_start/rate_limit/)
-- [ ] 429/500/503 有有界退避重试；400/401/402/422 不盲重试；重试不会导致结果重复入库。
-- [ ] 并发在账户级受控，多 API key 不被误认为各有独立额度。
-- [ ] 记录脱敏后的模型、thinking 状态、耗时、HTTP 状态、finish reason、token usage 和重试次数；绝不记录 API key，原文/译文日志需遵守项目隐私策略。
+勾选状态反映本仓库 Emby 插件在 `c02d752`（2026-09-02）时的实现，代码位于 `Jellyfin.Plugin.MetaTube/Translation/`。标注“本次已修”的三项来自本轮代码审查，已在同一提交中修复。
+
+- [x] **官方**：`base_url` 为 `https://api.deepseek.com`，请求路径正确拼成 `/chat/completions`。[首次 API 调用](https://api-docs.deepseek.com/) —— `DeepSeekClient.BuildEndpointUrl()`，同时兼容用户填入完整 endpoint 的情况。
+- [x] **官方**：使用 Bearer 鉴权，key 不进入请求体。[API 鉴权参考](https://api-docs.deepseek.com/api/deepseek-api/) —— key 只出现在 `Authorization` 头，且不写入日志。
+- [x] **官方**：模型是 `deepseek-v4-flash` 或 `deepseek-v4-pro`，没有继续使用已退役的 `deepseek-chat` / `deepseek-reasoner`。[更新日志](https://api-docs.deepseek.com/updates/) —— `DeepSeekClient.GetModelId()`。
+- [x] **官方**：普通翻译使用正式入口，不把 `base_url` 指向只用于 Prefix/FIM 的 `/beta`。 —— 默认 `https://api.deepseek.com`；自定义 url 由用户负责。
+- [x] **官方**：输出上限使用 `max_tokens`，system 指令使用 `system` role；没有直接套用 `max_completion_tokens` 或 `developer` role。 —— 使用 `system` role；未设置输出上限，沿用服务端默认。
+- [x] 显式决定 thinking，而不是误用 V4 默认 enabled；普通翻译建议 disabled。 —— 已做成设置项，始终显式发送 `thinking.type`；本仓库默认开启，理由见第 6 节。
+- [x] **官方**：若配置 `temperature: 1.3` 作为翻译温度，同时确认 thinking 已 disabled，否则 temperature 无效。[温度建议](https://api-docs.deepseek.com/quick_start/parameter_settings/)、[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) —— `temperature` 与 `reasoning_effort` 二选一发送。
+- [x] prompt 明确源语言、目标语言、仅输出译文、专有名词/术语规则，以及 HTML/字幕时间码/占位符/换行是否必须原样保留。 —— 默认 prompt 覆盖前四项；标题/简介为纯文本，无时间码与占位符需求。
+- [ ] 将不可信原文作为数据边界包裹，防止原文中的命令式文本改变翻译规则。 —— **未做**：不含 `{text}` 的 prompt 走 system + user 两条消息，算弱隔离；含 `{text}` 时原文直接内联进 prompt。
+- [x] **官方**：读取 `message.content`；thinking 时不把 `reasoning_content` 混入译文。[Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) —— 只读 `content`。
+- [x] **官方**：检查 `finish_reason`，仅把符合业务要求的完成结果交付；`length` 不能算成功。[Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) —— **本次已修**：`length` / `content_filter` 视为永久失败，`insufficient_system_resource` 视为可重试的临时失败。
+- [x] **官方**：JSON 模式同时设置 `response_format` 和 JSON prompt，并处理空内容、截断、整体 JSON 解析失败。[JSON Output](https://api-docs.deepseek.com/guides/json_mode/) —— **不适用**：只需纯译文字符串，未启用 JSON 模式；空内容已按临时失败处理。
+- [x] **官方**：流式处理忽略 keep-alive，分别拼接 `delta.content` / `delta.reasoning_content`，识别 `[DONE]`。[Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)、[Rate Limit & Isolation](https://api-docs.deepseek.com/quick_start/rate_limit/) —— **不适用**：`stream: false`。
+- [x] 客户端超时不短于官方排队/keep-alive 窗口，避免把仍在排队的请求提前取消并重发。[Rate Limit & Isolation](https://api-docs.deepseek.com/quick_start/rate_limit/) —— **本次已修**：120 秒改为 10 分钟。
+- [x] 429/500/503 有有界退避重试；400/401/402/422 不盲重试；重试不会导致结果重复入库。 —— **本次已修**：`DeepSeekException.IsTransient` 区分永久/临时失败，退避 1s/2s/4s/8s，最多 5 次；取消时立即中止。
+- [x] 并发在账户级受控，多 API key 不被误认为各有独立额度。 —— `TranslationHelper` 用 `SemaphoreSlim(1)` 全局串行，单请求并发数为 1。
+- [ ] 记录脱敏后的模型、thinking 状态、耗时、HTTP 状态、finish reason、token usage 和重试次数；绝不记录 API key，原文/译文日志需遵守项目隐私策略。 —— **未做**：`DeepSeekClient` 无日志，只有失败时由 `MovieProvider` 记录异常消息（含 HTTP 状态与 finish reason）；`usage`、耗时、重试次数均未记录。
 
 ## 官方资料索引
 
