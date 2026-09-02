@@ -133,11 +133,11 @@ public class MovieProvider : BaseProvider, IRemoteMetadataProvider<Movie, MovieI
         result.Item.SetPid(Name, m.Provider, m.Id, pid.Position);
 
         // Set trailer url.
-        var trailerUrl = !string.IsNullOrWhiteSpace(m.PreviewVideoUrl)
-            ? m.PreviewVideoUrl
-            : m.PreviewVideoHlsUrl;
-        if (!string.IsNullOrWhiteSpace(trailerUrl))
-            result.Item.SetTrailerUrl(trailerUrl);
+        // 只接受可直接下载的地址，不回退到 PreviewVideoHlsUrl：
+        // 下载器是单次 GET 直写文件，m3u8 播放列表会被“完整下载”成几 KB 文本并改名为 .mp4，
+        // 长度校验还会通过，之后所有“本地已存在”的判断都会命中这个假文件，闭环永久卡死。
+        if (!string.IsNullOrWhiteSpace(m.PreviewVideoUrl))
+            result.Item.SetTrailerUrl(m.PreviewVideoUrl);
 
         // Set community rating.
         if (Configuration.EnableRatings)
