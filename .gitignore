@@ -175,3 +175,24 @@ riderModule.iml
 *.zip
 
 .fake
+
+# .NET / IDE
+.vs/
+.vscode/
+*.user
+*.suo
+*.userprefs
+*.DotSettings.user
+*.binlog
+msbuild.log
+artifacts/
+
+# macOS
+._*
+.AppleDouble
+.Spotlight-V100
+.Trashes
+
+# Claude Code
+.claude/settings.local.json
+CLAUDE.local.md

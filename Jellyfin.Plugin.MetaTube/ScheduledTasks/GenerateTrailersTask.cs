@@ -1,14 +1,15 @@
 using Jellyfin.Plugin.MetaTube.Extensions;
-using Jellyfin.Plugin.MetaTube.Download;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Tasks;
 #if __EMBY__
+using Jellyfin.Plugin.MetaTube.Trailers;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Model.Logging;
 
 #else
+using Jellyfin.Plugin.MetaTube.Download;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Data.Enums;
 #endif
@@ -17,6 +18,7 @@ namespace Jellyfin.Plugin.MetaTube.ScheduledTasks;
 
 public class GenerateTrailersTask : IScheduledTask
 {
+#if !__EMBY__
     // Emby: trailers can be stored in a trailers sub-folder.
     // https://support.emby.media/support/solutions/articles/44001159193-trailers
     private const string TrailersFolder = "trailers";
@@ -27,17 +29,22 @@ public class GenerateTrailersTask : IScheduledTask
     // 下载中的临时文件后缀与匹配模式（例如 SSIS-001-trailer.mp4.tmp）。
     private const string TempFileSuffix = ".tmp";
     private const string TempSearchPattern = $"*{TrailerFileSuffix}{TempFileSuffix}";
+#endif
 
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger _logger;
+#if __EMBY__
+    private readonly ILogManager _logManager;
+#else
     private readonly TrailerDownloader _trailerDownloader;
+#endif
 
 #if __EMBY__
     public GenerateTrailersTask(ILogManager logManager, ILibraryManager libraryManager)
     {
         _logger = logManager.CreateLogger<GenerateTrailersTask>();
         _libraryManager = libraryManager;
-        _trailerDownloader = new TrailerDownloader(logManager.CreateLogger<TrailerDownloader>());
+        _logManager = logManager;
     }
 #else
     public GenerateTrailersTask(ILogger<GenerateTrailersTask> logger, ILibraryManager libraryManager)
@@ -58,22 +65,126 @@ public class GenerateTrailersTask : IScheduledTask
 
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
     {
+#if __EMBY__
+        // 不设置默认触发器：任务只在用户手动运行时执行。
+        // 需要定时的用户自行在 Emby UI 中添加触发器。
+        yield break;
+#else
         yield return new TaskTriggerInfo
         {
-#if __EMBY__
-            Type = TaskTriggerInfo.TriggerDaily,
-#else
             Type = TaskTriggerInfoType.DailyTrigger,
-#endif
             TimeOfDayTicks = TimeSpan.FromHours(1).Ticks
         };
+#endif
     }
 
 #if __EMBY__
     public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
+    {
+        // Stop the task if disabled.
+        if (!Plugin.Instance.Configuration.EnableTrailers)
+            return;
+
+        await Task.Yield();
+
+        progress?.Report(0);
+
+        // 单例可能因插件重载被换过，每次执行时重新取，避免拿到已关停的服务。
+        var trailerService = TrailerService.GetInstance(_logManager, _libraryManager);
+
+        // 用带 token 的重载：大媒体库查询期间用户停止任务能及时生效。
+        var items = _libraryManager.GetItemList(new InternalItemsQuery
+        {
+            MediaTypes = new[] { MediaType.Video },
+            HasAnyProviderId = new[] { Plugin.ProviderId },
+            IncludeItemTypes = new[] { nameof(Movie) }
+        }, cancellationToken);
+
+        // 预检阶段：逐个 Check 得出真正需要下载的候选，进度分母用它而不是全库总数。
+        // 五千部片里只有十几部缺预览片时，按总数算的进度条会瞬间冲到 99% 再卡住数小时。
+        var candidates = new List<long>();
+        foreach (var item in items)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (item is not Movie movie || movie.ExtraType != null)
+                continue;
+
+            try
+            {
+                if (trailerService.Check(movie.InternalId).NeedDownload)
+                    candidates.Add(movie.InternalId);
+            }
+            catch (Exception e)
+            {
+                _logger.Error("Scan trailer for video {0} error: {1}", item.Name, e.Message);
+            }
+        }
+
+        _logger.Info("Trailers to download: {0}", candidates.Count);
+
+        if (candidates.Count == 0)
+        {
+            progress?.Report(100);
+            return;
+        }
+
+        // 下载阶段：入队后与自动检查排在同一条队列里串行执行。
+        // 先入队再注册取消回调：注册时 token 若已取消会立即回调，
+        // 因此“入队途中被取消”和“入队完成后被取消”都能被 CancelPending 覆盖，不留竞态窗口。
+        var pending = new List<Task<TrailerProcessResult>>(candidates.Count);
+        foreach (var internalId in candidates)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            pending.Add(trailerService.EnqueueAsync(internalId));
+        }
+
+        using var registration = cancellationToken.Register(trailerService.CancelPending);
+
+        if (pending.Count == 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(100);
+            return;
+        }
+
+        int downloaded = 0, failed = 0, skipped = 0;
+        var failures = new List<string>();
+
+        for (var index = 0; index < pending.Count; index++)
+        {
+            var result = await pending[index];
+
+            switch (result.Status)
+            {
+                case TrailerProcessStatus.Downloaded:
+                    downloaded++;
+                    break;
+                case TrailerProcessStatus.Failed:
+                    failed++;
+                    failures.Add($"{result.ItemName} ({result.Message})");
+                    break;
+                default:
+                    skipped++;
+                    break;
+            }
+
+            // 成功与失败同样计入，进度不会卡住。
+            progress?.Report((double)(index + 1) / pending.Count * 100);
+
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        _logger.Info("Trailer scan finished: pending {0}, succeeded {1}, failed {2}, skipped {3}",
+            pending.Count, downloaded, failed, skipped);
+
+        foreach (var failure in failures)
+            _logger.Error("Trailer download failed: {0}", failure);
+
+        progress?.Report(100);
+    }
 #else
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
-#endif
     {
         // Stop the task if disabled.
         if (!Plugin.Instance.Configuration.EnableTrailers)
@@ -86,13 +197,8 @@ public class GenerateTrailersTask : IScheduledTask
         var items = _libraryManager.GetItemList(new InternalItemsQuery
         {
             MediaTypes = new[] { MediaType.Video },
-#if __EMBY__
-            HasAnyProviderId = new[] { Plugin.ProviderId },
-            IncludeItemTypes = new[] { nameof(Movie) },
-#else
             HasAnyProviderId = new Dictionary<string, string> { { Plugin.ProviderId, string.Empty } },
             IncludeItemTypes = new[] { BaseItemKind.Movie }
-#endif
         }).ToList();
 
         // 第一遍：扫描出“待下载”的影片（跳过已下载 / 无预览片 / 被忽略的，且不计入进度），
@@ -151,37 +257,31 @@ public class GenerateTrailersTask : IScheduledTask
 
                 // 添加重试逻辑
                 const int maxRetries = 2;
-                var success = false;
 
                 for (var retryCount = 0; retryCount <= maxRetries; retryCount++)
                 {
                     if (retryCount > 0)
-                    {
-#if __EMBY__
-                        _logger.Info("Retry {0}/{1} downloading trailer for video {2}", retryCount, maxRetries, entry.Item.Name);
-#else
-                        _logger.LogInformation("Retry {0}/{1} downloading trailer for video {2}", retryCount, maxRetries, entry.Item.Name);
-#endif
-                    }
+                        _logger.Info("Retry {0}/{1} downloading trailer for video {2}", retryCount, maxRetries,
+                            entry.Item.Name);
 
                     // Download trailer file.（不传单文件进度，进度按待下载影片计数推进）
-                    success = await _trailerDownloader.DownloadTrailerAsync(entry.TrailerUrl, entry.TrailerFilePath, null, cancellationToken);
+                    var result = await _trailerDownloader.DownloadTrailerAsync(entry.TrailerUrl,
+                        entry.TrailerFilePath, null, cancellationToken);
 
-                    if (success)
+                    if (result == TrailerDownloadResult.Success)
                     {
                         File.SetLastWriteTimeUtc(entry.TrailerFilePath, DateTime.UtcNow);
                         break;
                     }
 
+                    // 不可重试的失败，直接放弃这一部。
+                    if (result != TrailerDownloadResult.Failed)
+                        break;
+
                     // 最后一次尝试失败后记录日志
                     if (retryCount == maxRetries)
-                    {
-#if __EMBY__
-                        _logger.Error("Failed to download trailer for video {0} after {1} retries", entry.Item.Name, maxRetries);
-#else
-                        _logger.LogError("Failed to download trailer for video {0} after {1} retries", entry.Item.Name, maxRetries);
-#endif
-                    }
+                        _logger.Error("Failed to download trailer for video {0} after {1} retries", entry.Item.Name,
+                            maxRetries);
                 }
             }
             catch (Exception e)
@@ -213,4 +313,5 @@ public class GenerateTrailersTask : IScheduledTask
             // 忽略清理临时文件时的异常。
         }
     }
+#endif
 }
