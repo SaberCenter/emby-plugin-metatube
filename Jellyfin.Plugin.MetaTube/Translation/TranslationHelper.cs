@@ -14,7 +14,7 @@ public static class TranslationHelper
     private static PluginConfiguration Configuration => Plugin.Instance.Configuration;
 
     private static async Task<string> TranslateAsync(string q, string from, string to,
-        string deepSeekPrompt, CancellationToken cancellationToken)
+        string prompt, CancellationToken cancellationToken)
     {
         int millisecondsDelay;
         var nv = new NameValueCollection();
@@ -58,7 +58,8 @@ public static class TranslationHelper
                 });
                 break;
             case TranslationEngine.DeepSeek:
-                // DeepSeek is called directly from the plugin (see TranslateWithDelay),
+            case TranslationEngine.Grok:
+                // Both are called directly from the plugin (see TranslateWithDelay),
                 // so no backend parameters are required here.
                 millisecondsDelay = 200;
                 break;
@@ -74,11 +75,17 @@ public static class TranslationHelper
             {
                 await Task.Delay(millisecondsDelay, cancellationToken);
 
-                // DeepSeek bypasses the MetaTube backend and calls the API directly,
-                // allowing the prompt to be configured from the plugin UI.
-                if (Configuration.TranslationEngine == TranslationEngine.DeepSeek)
-                    return await DeepSeekClient.TranslateAsync(q, to, deepSeekPrompt, cancellationToken)
-                        .ConfigureAwait(false);
+                // DeepSeek and Grok bypass the MetaTube backend and call the API
+                // directly, allowing the prompt to be configured from the plugin UI.
+                switch (Configuration.TranslationEngine)
+                {
+                    case TranslationEngine.DeepSeek:
+                        return await DeepSeekClient.TranslateAsync(q, to, prompt, cancellationToken)
+                            .ConfigureAwait(false);
+                    case TranslationEngine.Grok:
+                        return await GrokClient.TranslateAsync(q, to, prompt, cancellationToken)
+                            .ConfigureAwait(false);
+                }
 
                 return (await ApiClient
                     .TranslateAsync(q, from, to, Configuration.TranslationEngine.ToString(), nv, cancellationToken)
@@ -99,26 +106,30 @@ public static class TranslationHelper
             throw new ArgumentException($"language not allowed: {to}");
 
         if (Configuration.TranslationMode.HasFlag(TranslationMode.Title) && !string.IsNullOrWhiteSpace(m.Title))
-            m.Title = await TranslateAsync(m.Title, AutoLanguageCode, to, ResolveDeepSeekTitlePrompt(),
+            m.Title = await TranslateAsync(m.Title, AutoLanguageCode, to, ResolveTitlePrompt(),
                 cancellationToken);
 
         if (Configuration.TranslationMode.HasFlag(TranslationMode.Summary) && !string.IsNullOrWhiteSpace(m.Summary))
-            m.Summary = await TranslateAsync(m.Summary, AutoLanguageCode, to, ResolveDeepSeekSummaryPrompt(),
+            m.Summary = await TranslateAsync(m.Summary, AutoLanguageCode, to, ResolveSummaryPrompt(),
                 cancellationToken);
     }
 
-    private static string ResolveDeepSeekTitlePrompt()
+    private static string ResolveTitlePrompt()
     {
-        return string.IsNullOrWhiteSpace(Configuration.DeepSeekTitlePrompt)
-            ? PluginConfiguration.DefaultDeepSeekTitlePrompt
+        var prompt = Configuration.TranslationEngine == TranslationEngine.Grok
+            ? Configuration.GrokTitlePrompt
             : Configuration.DeepSeekTitlePrompt;
+
+        return string.IsNullOrWhiteSpace(prompt) ? PluginConfiguration.DefaultAiTitlePrompt : prompt;
     }
 
-    private static string ResolveDeepSeekSummaryPrompt()
+    private static string ResolveSummaryPrompt()
     {
-        return string.IsNullOrWhiteSpace(Configuration.DeepSeekSummaryPrompt)
-            ? PluginConfiguration.DefaultDeepSeekSummaryPrompt
+        var prompt = Configuration.TranslationEngine == TranslationEngine.Grok
+            ? Configuration.GrokSummaryPrompt
             : Configuration.DeepSeekSummaryPrompt;
+
+        return string.IsNullOrWhiteSpace(prompt) ? PluginConfiguration.DefaultAiSummaryPrompt : prompt;
     }
 
     private static async Task<T> RetryAsync<T>(Func<Task<T>> func, int attemptCount,
@@ -146,10 +157,10 @@ public static class TranslationHelper
         if (cancellationToken.IsCancellationRequested)
             return false;
 
-        // Permanent DeepSeek errors (bad request, api key, balance, parameters or a
-        // truncated / filtered answer) cannot be fixed by resending the same request.
-        // Anything else -- including a client-side timeout, which also surfaces as an
-        // OperationCanceledException -- is treated as transient.
-        return e is not DeepSeekException { IsTransient: false };
+        // Permanent errors from a directly called API (bad request, api key, balance,
+        // parameters or a truncated / filtered / refused answer) cannot be fixed by
+        // resending the same request. Anything else -- including a client-side timeout,
+        // which also surfaces as an OperationCanceledException -- is treated as transient.
+        return e is not TranslationApiException { IsTransient: false };
     }
 }

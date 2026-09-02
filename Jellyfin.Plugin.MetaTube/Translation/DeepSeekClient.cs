@@ -32,27 +32,7 @@ public static class DeepSeekClient
         if (string.IsNullOrWhiteSpace(Configuration.DeepSeekApiKey))
             throw new ArgumentException("DeepSeek api key is not set");
 
-        var language = ToLanguageName(to);
-
-        // Build chat messages. If the prompt contains the {text} placeholder,
-        // the caller-supplied prompt controls the whole message; otherwise the
-        // prompt is used as a system instruction and the text is sent
-        // separately. An empty prompt falls back to sending the raw text.
-        var messages = new List<object>();
-        if (string.IsNullOrWhiteSpace(prompt))
-        {
-            messages.Add(new { role = "user", content = text });
-        }
-        else if (prompt.Contains("{text}"))
-        {
-            var content = prompt.Replace("{lang}", language).Replace("{text}", text);
-            messages.Add(new { role = "user", content });
-        }
-        else
-        {
-            messages.Add(new { role = "system", content = prompt.Replace("{lang}", language) });
-            messages.Add(new { role = "user", content = text });
-        }
+        var messages = LlmTranslationHelper.BuildMessages(text, to, prompt);
 
         // DeepSeek V4 defaults to thinking = enabled, so always send the flag
         // explicitly and let the plugin setting decide instead of the server default.
@@ -96,7 +76,7 @@ public static class DeepSeekClient
             // gateway errors) is treated as transient.
             var isTransient = statusCode is not (400 or 401 or 402 or 422);
             throw new DeepSeekException(
-                $"DeepSeek API request error: {statusCode} ({Truncate(responseText)})", isTransient);
+                $"DeepSeek API request error: {statusCode} ({LlmTranslationHelper.Truncate(responseText)})", isTransient);
         }
 
         using var document = JsonDocument.Parse(responseText);
@@ -104,7 +84,7 @@ public static class DeepSeekClient
         if (!document.RootElement.TryGetProperty("choices", out var choices) ||
             choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0)
             throw new DeepSeekException(
-                $"DeepSeek API returned no choices: {Truncate(responseText)}", true);
+                $"DeepSeek API returned no choices: {LlmTranslationHelper.Truncate(responseText)}", true);
 
         var choice = choices[0];
 
@@ -149,21 +129,12 @@ public static class DeepSeekClient
         return translated.Trim();
     }
 
-    private static string Truncate(string s, int maxLength = 512)
-    {
-        if (string.IsNullOrEmpty(s))
-            return string.Empty;
-
-        return s.Length <= maxLength ? s : s[..maxLength] + "...";
-    }
-
     private static string GetReasoningEffort()
     {
         return Configuration.DeepSeekReasoningEffort switch
         {
-            DeepSeekReasoningEffort.Low => "low",
-            DeepSeekReasoningEffort.Max => "max",
-            _ => "high"
+            DeepSeekReasoningEffort.High => "high",
+            _ => "low"
         };
     }
 
@@ -188,33 +159,6 @@ public static class DeepSeekClient
         return baseUrl.EndsWith(ChatCompletionsPath, StringComparison.OrdinalIgnoreCase)
             ? baseUrl
             : baseUrl + ChatCompletionsPath;
-    }
-
-    private static string ToLanguageName(string code)
-    {
-        if (string.IsNullOrWhiteSpace(code))
-            return "简体中文";
-
-        switch (code.ToLowerInvariant())
-        {
-            case "zh":
-            case "zh-cn":
-            case "zh-hans":
-                return "简体中文";
-            case "zh-tw":
-            case "zh-hk":
-            case "zh-hant":
-                return "繁体中文";
-            case "en":
-            case "en-us":
-                return "English";
-            case "ja":
-                return "日本語";
-            case "ko":
-                return "한국어";
-            default:
-                return code;
-        }
     }
 
     #region Http

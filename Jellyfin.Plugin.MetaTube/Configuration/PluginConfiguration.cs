@@ -243,10 +243,10 @@ public class PluginConfiguration : BasePluginConfiguration
     [DisplayName("DeepSeek reasoning effort")]
     [Description(
         "How much the model is allowed to think before answering. Lower is faster and cheaper. " +
-        "Only takes effect when thinking mode is enabled. (default: high)")]
+        "Only takes effect when thinking mode is enabled. (default: low)")]
     [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
 #endif
-    public DeepSeekReasoningEffort DeepSeekReasoningEffort { get; set; } = DeepSeekReasoningEffort.High;
+    public DeepSeekReasoningEffort DeepSeekReasoningEffort { get; set; } = DeepSeekReasoningEffort.Low;
 
 #if __EMBY__
     [DisplayName("DeepSeek title prompt")]
@@ -254,7 +254,7 @@ public class PluginConfiguration : BasePluginConfiguration
     [EditMultiline(6)]
     [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
 #endif
-    public string DeepSeekTitlePrompt { get; set; } = DefaultDeepSeekTitlePrompt;
+    public string DeepSeekTitlePrompt { get; set; } = DefaultAiTitlePrompt;
 
 #if __EMBY__
     [DisplayName("DeepSeek summary prompt")]
@@ -262,15 +262,55 @@ public class PluginConfiguration : BasePluginConfiguration
     [EditMultiline(6)]
     [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.DeepSeek)]
 #endif
-    public string DeepSeekSummaryPrompt { get; set; } = DefaultDeepSeekSummaryPrompt;
+    public string DeepSeekSummaryPrompt { get; set; } = DefaultAiSummaryPrompt;
 
-    public static string DefaultDeepSeekTitlePrompt => @"你是一名专业的影视字幕翻译，精通日语与中文。请将用户提供的日本影片标题翻译成简体中文。
+#if __EMBY__
+    [DisplayName("Grok api key")]
+    [Description("Access token for the xAI (Grok) API.")]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.Grok)]
+#endif
+    public string GrokApiKey { get; set; } = string.Empty;
+
+#if __EMBY__
+    [DisplayName("Grok api url")]
+    [Description("Custom xAI-compatible api url. (optional, default: https://api.x.ai/v1)")]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.Grok)]
+#endif
+    public string GrokApiUrl { get; set; } = string.Empty;
+
+#if __EMBY__
+    [DisplayName("Grok reasoning effort")]
+    [Description(
+        "How much grok-4.6 is allowed to think before answering. Thinking cannot be turned off " +
+        "and its tokens are billed as output, so medium already costs noticeably more " +
+        "without translating any better. (default: low)")]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.Grok)]
+#endif
+    public GrokReasoningEffort GrokReasoningEffort { get; set; } = GrokReasoningEffort.Low;
+
+#if __EMBY__
+    [DisplayName("Grok title prompt")]
+    [Description("Prompt for translating the title. Optional placeholders: {lang}, {text}.")]
+    [EditMultiline(6)]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.Grok)]
+#endif
+    public string GrokTitlePrompt { get; set; } = DefaultAiTitlePrompt;
+
+#if __EMBY__
+    [DisplayName("Grok summary prompt")]
+    [Description("Prompt for translating the summary. Optional placeholders: {lang}, {text}.")]
+    [EditMultiline(6)]
+    [VisibleCondition(nameof(TranslationEngine), ValueCondition.IsEqual, TranslationEngine.Grok)]
+#endif
+    public string GrokSummaryPrompt { get; set; } = DefaultAiSummaryPrompt;
+
+    public static string DefaultAiTitlePrompt => @"你是一名专业的影视字幕翻译，精通日语与中文。请将用户提供的日本影片标题翻译成简体中文。
 要求：
 1. 只输出翻译后的标题本身，不要输出任何解释、注释、原文或引号；
 2. 保留番号、人名、品牌名等专有名词；
 3. 标题简洁通顺，符合中文表达习惯。";
 
-    public static string DefaultDeepSeekSummaryPrompt => @"你是一名专业的影视字幕翻译，精通日语与中文。请将用户提供的日本影片简介翻译成简体中文。
+    public static string DefaultAiSummaryPrompt => @"你是一名专业的影视字幕翻译，精通日语与中文。请将用户提供的日本影片简介翻译成简体中文。
 要求：
 1. 只输出翻译后的简介本身，不要输出任何解释、注释、原文或引号；
 2. 保留人名、品牌名等专有名词；

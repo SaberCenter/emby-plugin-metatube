@@ -20,5 +20,8 @@ public enum TranslationEngine
     OpenAi,
 
     [Description("DeepSeek")]
-    DeepSeek
+    DeepSeek,
+
+    [Description("Grok")]
+    Grok
 }
