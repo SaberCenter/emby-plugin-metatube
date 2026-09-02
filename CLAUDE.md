@@ -55,3 +55,19 @@ dotnet build --configuration Release.Emby
 - 日志统一用 `Logger.Info/Warn/Error/Debug("... {0}", arg)` 位置参数格式（Emby 用 `MediaBrowser.Model.Logging.ILogger`，Jellyfin 侧由 `JellyfinExtensions` 提供同名扩展方法适配），不要写 Jellyfin 风格的 `{Name}` 结构化模板。
 - 提交信息沿用上游前缀：`Fix(Trailer): …`、`Feature(Emby): …`、`Chore: …`，正文可用中文。
 - 远端：`origin` = `SaberCenter/emby-plugin-metatube`，`upstream` = `metatube-community/jellyfin-plugin-metatube`。同步上游时注意保留本仓库的 Emby 侧改动。
+
+## PR 只提到本仓库
+
+**所有 PR 的目标仓库都是 `SaberCenter/emby-plugin-metatube`，base 分支是 `main`。**
+
+创建 PR 时必须显式指定仓库：
+
+```bash
+gh pr create --repo SaberCenter/emby-plugin-metatube --base main ...
+```
+
+原因：本仓库是 `metatube-community/jellyfin-plugin-metatube` 的 fork，`gh` 在未指定 `--repo` 时会把 PR 开到 fork 的父仓库（upstream）去。这已经误发生过一次（upstream#643，已关闭）。PR 一旦开出就无法删除，只能关闭，会在别人的公共仓库留下永久记录。
+
+同理，`gh pr list` / `gh pr view` / `gh issue` 等命令也都带上 `--repo SaberCenter/emby-plugin-metatube`，避免读到 upstream 的数据。
+
+要往 upstream 提交改动时先跟用户确认，不要自行发起。
